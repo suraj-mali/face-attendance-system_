@@ -11,20 +11,27 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("faculty_token");
-    if (!token) {
-      router.push("/login");
-    } else {
+    try {
+      const token = localStorage.getItem("faculty_token");
+      if (!token || token === "undefined" || token === "null" || token.trim() === "") {
+        router.replace("/login");
+        return;
+      }
       setIsAuthorized(true);
+      setAuthChecked(true);
+    } catch (err) {
+      console.error("Auth check error:", err);
+      router.replace("/login");
     }
   }, [router]);
 
-  if (!isAuthorized) {
+  if (!authChecked) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-gray-50">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent"></div>
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <p className="text-gray-500">Loading...</p>
       </div>
     );
   }

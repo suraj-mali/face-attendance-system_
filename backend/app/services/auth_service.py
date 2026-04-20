@@ -4,6 +4,7 @@ from passlib.context import CryptContext
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRY_HOURS
+from app.database import get_db
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
@@ -11,8 +12,26 @@ security = HTTPBearer()
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
-def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def authenticate_faculty(email: str, plain_password: str):
+    db = get_db()
+    result = db.table("faculty").select("*").eq("email", email).execute()
+    
+    if not result.data:
+        return None
+        
+    user = result.data[0]
+    
+    stored_hash = user.get("password_hash") or user.get("password")
+    if not stored_hash:
+        return None
+        
+    if not verify_password(plain_password, stored_hash):
+        return None
+        
+    return user
 
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()

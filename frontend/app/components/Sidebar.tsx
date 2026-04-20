@@ -10,17 +10,30 @@ export default function Sidebar() {
   const [facultyName, setFacultyName] = useState("");
 
   useEffect(() => {
-    const name = localStorage.getItem("faculty_name");
-    if (name) {
-      setFacultyName(name);
+    try {
+      const rawName = localStorage.getItem("faculty_name");
+      const savedFacultyName = (rawName && rawName !== "undefined" && rawName !== "null")
+        ? rawName
+        : "Faculty";
+      setFacultyName(savedFacultyName);
+
+      const rawId = localStorage.getItem("faculty_id");
+      const facultyId = (rawId && rawId !== "undefined" && rawId !== "null")
+        ? rawId
+        : "";
+    } catch (err) {
+      console.error("Sidebar auth read error:", err);
+      setFacultyName("Faculty");
     }
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem("faculty_token");
-    localStorage.removeItem("faculty_name");
-    localStorage.removeItem("faculty_id");
-    router.push("/login");
+    try {
+      localStorage.clear();
+    } catch (e) {
+      console.error("Logout error:", e);
+    }
+    router.replace("/login");
   };
 
   const navItems = [

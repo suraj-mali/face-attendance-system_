@@ -5,14 +5,15 @@ from datetime import date
 from app.services.auth_service import get_current_faculty
 from app.database import get_db
 
-router = APIRouter(prefix="/faculty")
+router = APIRouter()
 
 class FacultyUpdate(BaseModel):
     name: Optional[str] = None
     department: Optional[str] = None
 
 @router.get("/profile")
-def get_profile(faculty_id: str = Depends(get_current_faculty), db=Depends(get_db)):
+def get_profile(current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+    faculty_id = current_faculty["faculty_id"]
     response = db.table("faculty").select("*").eq("id", faculty_id).execute()
     
     if not response.data:
@@ -32,9 +33,10 @@ def get_profile(faculty_id: str = Depends(get_current_faculty), db=Depends(get_d
 @router.put("/profile")
 def update_profile(
     update_data: FacultyUpdate,
-    faculty_id: str = Depends(get_current_faculty),
+    current_faculty: dict = Depends(get_current_faculty),
     db=Depends(get_db)
 ):
+    faculty_id = current_faculty["faculty_id"]
     update_dict = update_data.model_dump(exclude_unset=True)
     if not update_dict:
         raise HTTPException(
@@ -59,23 +61,24 @@ def update_profile(
     return updated_faculty
 
 @router.get("/dashboard-stats")
-def get_dashboard_stats(faculty_id: str = Depends(get_current_faculty), db=Depends(get_db)):
-    # 1. Total Students
-    students_res = db.table("students").select("id", count="exact").execute()
-    total_students = students_res.count if hasattr(students_res, "count") and students_res.count is not None else len(students_res.data)
+def get_dashboard_stats(current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+    faculty_id = current_faculty["faculty_id"]
+    
+    # 1. Total Students 
+    students_res = db.table("students").select("*", count="exact").execute()
+    total_students = students_res.count if students_res.count is not None else 0
     
     # 2. Total Courses for this faculty
-    courses_res = db.table("courses").select("id", count="exact").eq("faculty_id", faculty_id).execute()
-    total_courses = courses_res.count if hasattr(courses_res, "count") and courses_res.count is not None else len(courses_res.data)
+    courses_res = db.table("courses").select("*", count="exact").eq("faculty_id", faculty_id).execute()
+    total_courses = courses_res.count if courses_res.count is not None else 0
     
     # 3. Today's Sessions
-    today = str(date.today())
-    todays_sessions_res = db.table("attendance_sessions").select("id", count="exact")\
+    today = date.today().isoformat()
+    todays_sessions_res = db.table("attendance_sessions").select("*", count="exact")\
         .eq("faculty_id", faculty_id)\
-        .gte("created_at", f"{today}T00:00:00")\
-        .lte("created_at", f"{today}T23:59:59")\
+        .eq("session_date", today)\
         .execute()
-    todays_sessions = todays_sessions_res.count if hasattr(todays_sessions_res, "count") and todays_sessions_res.count is not None else len(todays_sessions_res.data)
+    todays_sessions = todays_sessions_res.count if todays_sessions_res.count is not None else 0
     
     # 4. Average Attendance Percentage
     sessions_res = db.table("attendance_sessions").select("present_count, total_students").eq("faculty_id", faculty_id).execute()
@@ -103,3 +106,4 @@ def get_dashboard_stats(faculty_id: str = Depends(get_current_faculty), db=Depen
         "todays_sessions": todays_sessions,
         "avg_attendance": avg_attendance
     }
+

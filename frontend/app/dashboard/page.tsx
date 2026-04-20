@@ -190,7 +190,7 @@
 //                             <p className="text-slate-500 text-sm">You have a free schedule for the rest of the day.</p>
 //                         </div>
 //                     )}
-//                 </div>
+//                 </div>z
 //             </div>
 //         </div>
 //     );
@@ -298,8 +298,10 @@ interface Stats {
 interface TimetableSlot {
   id: string;
   course_id: string;
-  course_name?: string;
-  course_code?: string;
+  courses: {
+    name: string;
+    code: string;
+  };
   start_time: string;
   end_time: string;
   room: string;
@@ -320,18 +322,29 @@ export default function DashboardOverviewPage() {
           return;
         }
 
+        console.log("Token being used:", token ? "EXISTS" : "MISSING")
+
+        const res = await fetch(
+          process.env.NEXT_PUBLIC_API_URL + "/faculty/dashboard-stats",
+          { headers: { "Authorization": "Bearer " + token } }
+        )
+        const data = await res.json()
+        console.log("Stats API status:", res.status)
+        console.log("Stats API response:", data)
+
+        setStats({
+          total_students: Number(data.total_students) || 0,
+          total_courses: Number(data.total_courses) || 0,
+          todays_sessions: Number(data.todays_sessions) || 0,
+          avg_attendance: Number(data.avg_attendance) || 0
+        })
+
         const config = {
           headers: {
-            Authorization: `Bearer ${token}`,
+            "Authorization": `Bearer ${token}`,
           },
         };
-
-        const [statsResponse, timetableResponse] = await Promise.all([
-          axios.get(`${process.env.NEXT_PUBLIC_API_URL}/faculty/dashboard-stats`, config),
-          axios.get(`${process.env.NEXT_PUBLIC_API_URL}/timetable/today`, config),
-        ]);
-
-        setStats(statsResponse.data);
+        const timetableResponse = await axios.get(process.env.NEXT_PUBLIC_API_URL + "/timetable/today", config);
         setTimetable(timetableResponse.data);
       } catch (error) {
         console.error("Failed to fetch dashboard data:", error);
@@ -384,20 +397,20 @@ export default function DashboardOverviewPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <p className="text-sm font-medium text-gray-500 mb-1">Total Students</p>
-          <p className="text-3xl font-bold text-gray-900">{stats?.total_students || 0}</p>
+          <p className="text-3xl font-bold text-gray-900">{stats ? stats.total_students : 0}</p>
         </div>
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <p className="text-sm font-medium text-gray-500 mb-1">Total Courses</p>
-          <p className="text-3xl font-bold text-gray-900">{stats?.total_courses || 0}</p>
+          <p className="text-3xl font-bold text-gray-900">{stats ? stats.total_courses : 0}</p>
         </div>
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <p className="text-sm font-medium text-gray-500 mb-1">Today's Sessions</p>
-          <p className="text-3xl font-bold text-gray-900">{stats?.todays_sessions || 0}</p>
+          <p className="text-3xl font-bold text-gray-900">{stats ? stats.todays_sessions : 0}</p>
         </div>
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <p className="text-sm font-medium text-gray-500 mb-1">Avg Attendance</p>
           <p className="text-3xl font-bold text-gray-900">
-            {stats?.avg_attendance ? `${stats.avg_attendance}%` : "0%"}
+            {stats ? stats.avg_attendance + "%" : "0%"}
           </p>
         </div>
       </div>
@@ -428,31 +441,50 @@ export default function DashboardOverviewPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-sm">
-                {timetable.map((slot) => (
-                  <tr key={slot.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-900 font-medium">
-                      {formatTime(slot.start_time)} - {formatTime(slot.end_time)}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-gray-900 font-medium">{slot.course_name || "Unknown Course"}</div>
-                      <div className="text-gray-500 text-xs mt-0.5">{slot.course_code}</div>
-                    </td>
-                    <td className="px-6 py-4 text-gray-700 whitespace-nowrap">
-                      {slot.room}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right bg">
-                      <button
-                        onClick={() => router.push(`/dashboard/attendance?course_id=${slot.course_id}`)}
-                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-colors"
-                      >
-                        <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
-                        Take Attendance
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {timetable.map((slot: any) => {
+                  const name =
+                    slot.course_name ||
+                    slot.courses?.name ||
+                    slot.course?.name ||
+                    'Unknown Course'
+
+                  const code =
+                    slot.course_code ||
+                    slot.courses?.code ||
+                    slot.course?.code ||
+                    ''
+
+                  const cid =
+                    slot.course_id ||
+                    slot.courses?.id ||
+                    slot.id
+
+                  return (
+                    <tr key={slot.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap text-gray-900 font-medium">
+                        {(slot.start_time || '').slice(0, 5)} - {(slot.end_time || '').slice(0, 5)}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-gray-900 font-medium">{name}</div>
+                        <div className="text-gray-500 text-xs mt-0.5">{code}</div>
+                      </td>
+                      <td className="px-6 py-4 text-gray-700 whitespace-nowrap">
+                        {slot.room}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right bg">
+                        <button
+                          onClick={() => router.push(`/dashboard/attendance/session?course_id=${cid}`)}
+                          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-colors"
+                        >
+                          <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          Take Attendance
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

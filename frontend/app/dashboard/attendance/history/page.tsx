@@ -14,21 +14,24 @@ interface AttendanceHistory {
   course_id: string;
   course_name: string;
   course_code: string;
-  created_at: string;
+  session_date: string;
+  started_at: string;
   ended_at: string;
-  present_count: number;
   total_students: number;
+  present_count: number;
+  absent_count: number;
+  attendance_percentage: number;
 }
 
 interface AttendanceRecord {
   id: string;
   student_id: string;
-  student_name: string;
+  name: string;
   roll_number: string;
   is_present: boolean;
   confidence_score: number | null;
+  marked_at: string;
   marked_by: string;
-  created_at: string; // fallback if time needed
 }
 
 export default function AttendanceHistoryPage() {
@@ -42,8 +45,6 @@ export default function AttendanceHistoryPage() {
   // Pagination Support (Basic Local or via API)
   const [page, setPage] = useState(1);
   const perPage = 10;
-  // History API might return a flat array, we map manually for local pagination 
-  // or pass limit/offset. The prompt states GET /attendance/history params: course_id, limit, offset.
   const [totalRecords, setTotalRecords] = useState(0);
 
   // Inline Panel State
@@ -69,23 +70,32 @@ export default function AttendanceHistoryPage() {
   const fetchHistory = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem("faculty_token");
-      const offset = (page - 1) * perPage;
-      let url = `${process.env.NEXT_PUBLIC_API_URL}/attendance/history?limit=${perPage}&offset=${offset}`;
+      const token = localStorage.getItem('faculty_token');
+      let url = process.env.NEXT_PUBLIC_API_URL + '/attendance/history';
       if (selectedCourse) {
-        url += `&course_id=${selectedCourse}`;
+        url += `?course_id=${selectedCourse}`;
       }
       
-      const res = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` }
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json'
+        }
       });
       
-      setHistory(res.data);
-      // Assuming a simplistic approach if API doesn't return count, we just enable next if res.data === perPage
-      setTotalRecords(res.data.length === perPage ? page * perPage + 1 : (page - 1) * perPage + res.data.length);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error('History fetch error:', res.status, err);
+        throw new Error(err.detail || 'Failed to fetch attendance history records.');
+      }
+      
+      const data = await res.json();
+      console.log('History data:', data);
+      setHistory(data.sessions || data || []);
+      setTotalRecords(data.total || (data.sessions ? data.sessions.length : (data.length || 0)));
       setError(null);
     } catch (err: any) {
-      setError("Failed to fetch attendance history records.");
+      setError(err.message || 'Failed to fetch attendance history records.');
     } finally {
       setLoading(false);
     }
@@ -107,12 +117,20 @@ export default function AttendanceHistoryPage() {
       setExpandedLoading(true);
       try {
         const token = localStorage.getItem("faculty_token");
-        const res = await axios.get(
+        const res = await fetch(
           `${process.env.NEXT_PUBLIC_API_URL}/attendance/session/${sessionId}/records`,
-          { headers: { Authorization: `Bearer ${token}` } }
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }
         );
-        // Sort: Absent first, then alphabetical
-        const sorted = res.data.sort((a: AttendanceRecord, b: AttendanceRecord) => {
+        const data = await res.json();
+        
+        const records = data.records || [];
+        // Sort: Absent first, then alphabetical (if we want to keep some sorting)
+        const sorted = records.sort((a: AttendanceRecord, b: AttendanceRecord) => {
           if (a.is_present === b.is_present) {
             return a.roll_number.localeCompare(b.roll_number);
           }
@@ -126,16 +144,6 @@ export default function AttendanceHistoryPage() {
         setExpandedLoading(false);
       }
     }
-  };
-
-  const formatDate = (isoStr: string) => {
-    if (!isoStr) return "N/A";
-    return new Date(isoStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  };
-
-  const formatTime = (isoStr: string) => {
-    if (!isoStr) return "Ongoing";
-    return new Date(isoStr).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
   };
 
   const handleCourseFilter = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -179,17 +187,16 @@ export default function AttendanceHistoryPage() {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Date</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Course</th>
-                  <th className="px-6 py-3 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Start</th>
-                  <th className="px-6 py-3 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">End</th>
                   <th className="px-6 py-3 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">P / T</th>
                   <th className="px-6 py-3 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">%</th>
+                  <th className="px-6 py-3 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">Records</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-100 text-sm">
                 {loading && history.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                       <div className="flex justify-center mb-2">
                         <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
                       </div>
@@ -198,50 +205,51 @@ export default function AttendanceHistoryPage() {
                   </tr>
                 ) : history.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
-                      <p>No attendance history found.</p>
+                    <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                      <p>No attendance sessions found. Take your first attendance!</p>
                     </td>
                   </tr>
                 ) : (
                   history.map((session) => {
-                    const percentage = session.total_students > 0 
-                      ? Math.round((session.present_count / session.total_students) * 100) 
-                      : 0;
                     const isExpanded = expandedRow === session.id;
 
                     return (
                       <React.Fragment key={session.id}>
                         <tr className={`hover:bg-gray-50 transition-colors ${isExpanded ? 'bg-blue-50/30' : ''}`}>
                           <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900 border-l-4 border-transparent">
-                            {formatDate(session.created_at)}
+                            {session.session_date ? new Date(session.session_date).toLocaleDateString('en-IN') : 'N/A'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="font-bold text-gray-800">{session.course_code}</div>
-                            <div className="text-xs text-gray-500 truncate max-w-[150px]">{session.course_name}</div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-center text-gray-600 font-mono">
-                            {formatTime(session.created_at)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-center text-gray-600 font-mono">
-                            {formatTime(session.ended_at)}
+                            <div className="font-bold text-gray-800">{session.course_name} ({session.course_code})</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-center font-bold text-gray-800">
                             {session.present_count} <span className="text-gray-400 font-normal">/ {session.total_students}</span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${
-                                percentage >= 75 ? 'bg-green-100 text-green-800' : 
-                                percentage >= 50 ? 'bg-orange-100 text-orange-800' : 'bg-red-100 text-red-800'
+                                session.attendance_percentage >= 75 ? 'bg-green-100 text-green-800' : 
+                                session.attendance_percentage >= 50 ? 'bg-orange-100 text-orange-800' : 'bg-red-100 text-red-800'
                             }`}>
-                                {percentage}%
+                                {session.attendance_percentage}%
                             </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-center">
+                            {session.ended_at ? (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                Completed
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                                Ongoing
+                              </span>
+                            )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right">
                             <button
                               onClick={() => toggleRow(session.id)}
                               className="text-blue-600 hover:text-blue-800 font-medium text-sm flex items-center justify-end w-full focus:outline-none"
                             >
-                              View
+                              View Records
                               <svg className={`w-4 h-4 ml-1 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                               </svg>
@@ -252,7 +260,7 @@ export default function AttendanceHistoryPage() {
                         {/* Expandable Sub-table Row */}
                         {isExpanded && (
                           <tr className="bg-gray-50/80 shadow-inner">
-                            <td colSpan={7} className="p-0 border-b border-gray-300">
+                            <td colSpan={6} className="p-0 border-b border-gray-300">
                                 <div className="px-8 py-6 w-full animate-in slide-in-from-top-2 duration-200">
                                     <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
                                         <div className="px-4 py-3 border-b border-gray-200 bg-gray-100/50 flex justify-between items-center text-xs uppercase tracking-wider font-bold text-gray-600">
@@ -271,37 +279,37 @@ export default function AttendanceHistoryPage() {
                                             <table className="min-w-full divide-y divide-gray-100">
                                                 <thead className="bg-white sticky top-0">
                                                     <tr>
-                                                        <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500">Roll No</th>
                                                         <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500">Name</th>
+                                                        <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500">Roll No</th>
                                                         <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500">Status</th>
                                                         <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500">Confidence</th>
+                                                        <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500">Method</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100 text-sm bg-white">
                                                     {recordsCache[session.id]?.length === 0 && (
-                                                        <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-400">No records found.</td></tr>
+                                                        <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400">No records found.</td></tr>
                                                     )}
                                                     {recordsCache[session.id]?.map(record => (
-                                                        <tr key={record.id} className="hover:bg-gray-50">
+                                                        <tr key={record.id} className={`hover:bg-gray-50 border-l-4 ${record.is_present ? 'border-green-500' : 'border-red-500'}`}>
+                                                            <td className="px-4 py-2 whitespace-nowrap font-medium text-gray-900">{record.name}</td>
                                                             <td className="px-4 py-2 whitespace-nowrap font-mono text-gray-500">{record.roll_number}</td>
-                                                            <td className="px-4 py-2 whitespace-nowrap font-medium text-gray-900">{record.student_name}</td>
                                                             <td className="px-4 py-2 whitespace-nowrap">
                                                                 {record.is_present ? (
-                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                                                                        Present
-                                                                    </span>
+                                                                    <span className="font-medium text-green-700">Present</span>
                                                                 ) : (
-                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-                                                                        Absent
-                                                                    </span>
+                                                                    <span className="font-medium text-red-700">Absent</span>
                                                                 )}
                                                             </td>
                                                             <td className="px-4 py-2 whitespace-nowrap text-right">
-                                                                {record.confidence_score ? (
+                                                                {record.confidence_score !== null && record.confidence_score !== undefined ? (
                                                                     <span className="text-xs text-gray-500">{(record.confidence_score * 100).toFixed(1)}%</span>
                                                                 ) : (
                                                                     <span className="text-xs text-gray-400">—</span>
                                                                 )}
+                                                            </td>
+                                                            <td className="px-4 py-2 whitespace-nowrap text-right text-gray-500 text-xs">
+                                                                {record.marked_by === 'face_recognition' ? 'Auto (Face)' : record.marked_by}
                                                             </td>
                                                         </tr>
                                                     ))}

@@ -156,24 +156,46 @@ export default function FacultyLoginPage() {
     setLoading(true);
 
     try {
+      localStorage.clear();
+
       const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
         email,
         password,
       });
 
-      const token = response.data.access_token;
+      const data = response.data;
+
+      if (!data || (!data.access_token && !data.token)) {
+        setError('Login failed: invalid server response');
+        return;
+      }
+
+      const token = data.access_token || data.token || '';
       
       // Decode JWT to extract faculty info securely
       const payloadBase64 = token.split('.')[1];
       const payloadDecoded = JSON.parse(atob(payloadBase64));
 
-      localStorage.setItem("faculty_token", token);
-      localStorage.setItem("faculty_name", payloadDecoded.name || "Faculty Member");
-      localStorage.setItem("faculty_id", payloadDecoded.sub || "");
+      localStorage.setItem('faculty_token', token);
+      localStorage.setItem('faculty_name', data.faculty_name || payloadDecoded.name || 'Faculty');
+      localStorage.setItem('faculty_id', data.faculty_id || data.id || payloadDecoded.sub || '');
 
-      router.push("/dashboard");
+      router.replace("/dashboard");
     } catch (err: any) {
-      setError("Invalid email or password");
+      console.error('Login error:', err);
+      if (err.response) {
+        if (err.response.status === 401) {
+          setError('Incorrect email or password');
+        } else if (err.response.status === 422) {
+          setError('Invalid email format');
+        } else if (err.response.status === 500) {
+          setError('Server error - check backend terminal');
+        } else {
+          setError('Login failed: ' + (err.response.data?.detail || err.response.status));
+        }
+      } else {
+        setError('Connection failed. Make sure backend is running on port 8000.');
+      }
     } finally {
       setLoading(false);
     }

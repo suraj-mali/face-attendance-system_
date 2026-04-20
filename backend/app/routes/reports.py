@@ -9,7 +9,8 @@ from app.database import get_db
 router = APIRouter()
 
 @router.get("/summary")
-def get_summary(faculty_id: str = Depends(get_current_faculty), db=Depends(get_db)):
+def get_summary(current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+    faculty_id = current_faculty["faculty_id"]
     # 1. Total Students
     students_res = db.table("students").select("id", count="exact").execute()
     total_students = students_res.count if hasattr(students_res, "count") and students_res.count is not None else len(students_res.data)
@@ -22,8 +23,8 @@ def get_summary(faculty_id: str = Depends(get_current_faculty), db=Depends(get_d
     today = str(date.today())
     todays_sessions_res = db.table("attendance_sessions").select("id", count="exact")\
         .eq("faculty_id", faculty_id)\
-        .gte("created_at", f"{today}T00:00:00")\
-        .lte("created_at", f"{today}T23:59:59")\
+        .gte("started_at", f"{today}T00:00:00")\
+        .lte("started_at", f"{today}T23:59:59")\
         .execute()
     todays_sessions = todays_sessions_res.count if hasattr(todays_sessions_res, "count") and todays_sessions_res.count is not None else len(todays_sessions_res.data)
     
@@ -78,9 +79,9 @@ def _calculate_attendance_data(
     # Count sessions in date range for course_id
     sessions_query = db.table("attendance_sessions").select("id", count="exact").eq("course_id", course_id)
     if from_date:
-        sessions_query = sessions_query.gte("created_at", f"{from_date}T00:00:00")
+        sessions_query = sessions_query.gte("started_at", f"{from_date}T00:00:00")
     if to_date:
-        sessions_query = sessions_query.lte("created_at", f"{to_date}T23:59:59")
+        sessions_query = sessions_query.lte("started_at", f"{to_date}T23:59:59")
         
     sessions_res = sessions_query.execute()
     total_sessions = sessions_res.count if hasattr(sessions_res, "count") and sessions_res.count is not None else len(sessions_res.data)
@@ -123,21 +124,129 @@ def _calculate_attendance_data(
 @router.get("/attendance")
 def get_attendance(
     course_id: str,
-    from_date: Optional[str] = None,
-    to_date: Optional[str] = None,
-    faculty_id: str = Depends(get_current_faculty),
-    db=Depends(get_db)
+    from_date: str = None,
+    to_date: str = None,
+    current_faculty: dict = Depends(get_current_faculty)
 ):
-    return _calculate_attendance_data(course_id, from_date, to_date, faculty_id, db)
+    faculty_id = current_faculty['faculty_id']
+
+    try:
+        from datetime import date
+        db = get_db()
+
+        # Validate course belongs to faculty
+        course_res = db.table('courses').select(
+            'id, name, code'
+        ).eq('id', course_id).eq('faculty_id', faculty_id).execute()
+
+        if not course_res.data:
+            raise HTTPException(
+                status_code=404,
+                detail='Course not found or does not belong to you'
+            )
+        course = course_res.data[0]
+
+        # Default date range if not provided
+        if not from_date:
+            from_date = '2024-01-01'
+        if not to_date:
+            to_date = date.today().isoformat()
+
+        # Get all sessions for this course in date range
+        sessions_res = db.table('attendance_sessions').select(
+            'id'
+        ).eq('course_id', course_id).gte(
+            'session_date', from_date
+        ).lte('session_date', to_date).execute()
+
+        session_ids = [s['id'] for s in (sessions_res.data or [])]
+        total_sessions = len(session_ids)
+
+        # Get all enrolled students
+        students_res = db.table('students').select(
+            'id, name, roll_number'
+        ).eq('is_enrolled', True).execute()
+        students = students_res.data or []
+
+        result = []
+        for student in students:
+            if not session_ids:
+                present_count = 0
+            else:
+                records_res = db.table('attendance_records').select(
+                    'id', count='exact'
+                ).eq('student_id', student['id']).eq(
+                    'is_present', True
+                ).in_('session_id', session_ids).execute()
+                present_count = records_res.count or len(
+                    records_res.data or []
+                )
+
+            absent_count = total_sessions - present_count
+            percentage = round(
+                present_count / total_sessions * 100, 1
+            ) if total_sessions > 0 else 0.0
+
+            import math
+            if percentage < 75 and total_sessions > 0:
+                needed = math.ceil(
+                    (0.75 * total_sessions - present_count) / 0.25
+                )
+                shortfall = max(0, needed)
+            else:
+                shortfall = 0
+
+            result.append({
+                'id': student['id'],
+                'name': student['name'],
+                'roll_number': student['roll_number'],
+                'total_classes': total_sessions,
+                'present': present_count,
+                'absent': absent_count,
+                'percentage': percentage,
+                'is_defaulter': percentage < 75,
+                'shortfall': shortfall
+            })
+
+        result.sort(key=lambda x: x['percentage'])
+
+        defaulters = [s for s in result if s['is_defaulter']]
+
+        avg = round(
+            sum(s['percentage'] for s in result) / len(result), 1
+        ) if result else 0.0
+
+        return {
+            'course_name': course['name'],
+            'course_code': course['code'],
+            'total_sessions': total_sessions,
+            'from_date': from_date,
+            'to_date': to_date,
+            'students': result,
+            'defaulters': defaulters,
+            'defaulter_count': len(defaulters),
+            'class_average': avg
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f'Report error: {str(e)}'
+        )
 
 @router.get("/export")
 def export_attendance(
     course_id: str,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
-    faculty_id: str = Depends(get_current_faculty),
+    current_faculty: dict = Depends(get_current_faculty),
     db=Depends(get_db)
 ):
+    faculty_id = current_faculty["faculty_id"]
     data = _calculate_attendance_data(course_id, from_date, to_date, faculty_id, db)
     excel_bytes = generate_attendance_excel(data)
     
@@ -150,9 +259,10 @@ def export_attendance(
 @router.post("/send-alerts")
 def send_alerts(
     course_id: str,
-    faculty_id: str = Depends(get_current_faculty),
+    current_faculty: dict = Depends(get_current_faculty),
     db=Depends(get_db)
 ):
+    faculty_id = current_faculty["faculty_id"]
     # Calculate attendance without dates to get overall percentages
     data = _calculate_attendance_data(course_id, None, None, faculty_id, db)
     
@@ -172,3 +282,4 @@ def send_alerts(
         "alerted_students": alerted_students,
         "count": len(alerted_students)
     }
+

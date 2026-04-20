@@ -1,155 +1,142 @@
-# from fastapi import APIRouter, Depends, HTTPException, status
-# from typing import List
-# from app.models.course import CourseCreate, CourseResponse
-# from app.services.auth_service import get_current_faculty
-# from app.database import get_db
-
-# router = APIRouter()
-
-# @router.get("/", response_model=List[CourseResponse])
-# def get_courses(faculty_id: str = Depends(get_current_faculty), db=Depends(get_db)):
-#     response = db.table("courses").select("*").eq("faculty_id", faculty_id).execute()
-#     return response.data
-
-# @router.post("/", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
-# def create_course(
-#     course: CourseCreate, 
-#     faculty_id: str = Depends(get_current_faculty), 
-#     db=Depends(get_db)
-# ):
-#     # Check if course code is unique globally or per faculty. Assuming globally.
-#     existing = db.table("courses").select("id").eq("code", course.code).execute()
-#     if existing.data:
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="Course with this code already exists"
-#         )
-        
-#     course_data = course.model_dump()
-#     course_data["faculty_id"] = faculty_id
-    
-#     response = db.table("courses").insert(course_data).execute()
-#     if not response.data:
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Failed to create course"
-#         )
-        
-#     return response.data[0]
-
-# @router.get("/{course_id}", response_model=CourseResponse)
-# def get_course(
-#     course_id: str, 
-#     faculty_id: str = Depends(get_current_faculty), 
-#     db=Depends(get_db)
-# ):
-#     response = db.table("courses").select("*").eq("id", course_id).eq("faculty_id", faculty_id).execute()
-#     if not response.data:
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND,
-#             detail="Course not found or unauthorized"
-#         )
-        
-#     return response.data[0]
-
-# @router.put("/{course_id}", response_model=CourseResponse)
-# def update_course(
-#     course_id: str, 
-#     course_data: CourseCreate, 
-#     faculty_id: str = Depends(get_current_faculty), 
-#     db=Depends(get_db)
-# ):
-#     # Verify ownership
-#     existing = db.table("courses").select("id").eq("id", course_id).eq("faculty_id", faculty_id).execute()
-#     if not existing.data:
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND,
-#             detail="Course not found or unauthorized"
-#         )
-    
-#     update_payload = course_data.model_dump(exclude_unset=True)
-#     response = db.table("courses").update(update_payload).eq("id", course_id).execute()
-    
-#     if not response.data:
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Failed to update course"
-#         )
-        
-#     return response.data[0]
-
-# @router.delete("/{course_id}")
-# def delete_course(
-#     course_id: str, 
-#     faculty_id: str = Depends(get_current_faculty), 
-#     db=Depends(get_db)
-# ):
-#     existing = db.table("courses").select("id").eq("id", course_id).eq("faculty_id", faculty_id).execute()
-#     if not existing.data:
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND,
-#             detail="Course not found or unauthorized"
-#         )
-        
-#     response = db.table("courses").delete().eq("id", course_id).execute()
-#     return {"message": "Course deleted"}
-
-# @router.patch("/{course_id}/toggle")
-# def toggle_course(
-#     course_id: str, 
-#     faculty_id: str = Depends(get_current_faculty), 
-#     db=Depends(get_db)
-# ):
-#     existing = db.table("courses").select("is_active").eq("id", course_id).eq("faculty_id", faculty_id).execute()
-#     if not existing.data:
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND,
-#             detail="Course not found or unauthorized"
-#         )
-        
-#     current_status = existing.data[0].get("is_active", True)
-#     new_status = not current_status
-    
-#     response = db.table("courses").update({"is_active": new_status}).eq("id", course_id).execute()
-#     if not response.data:
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Failed to toggle course status"
-#         )
-        
-#     return {
-#         "course_id": course_id,
-#         "is_active": new_status
-#     }
-
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from app.models.timetable import TimetableCreate, TimetableResponse
 from app.services.auth_service import get_current_faculty
 from app.database import get_db
+from datetime import date
 
 router = APIRouter()
 
+@router.get("/today", response_model=List[TimetableResponse])
+def get_today_timetable(current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+    faculty_id = current_faculty['faculty_id']
+
+    try:
+        from datetime import datetime
+        db = get_db()
+
+        today = datetime.now().strftime('%A')
+        print(f'Fetching timetable for: {today}, faculty: {faculty_id}')
+
+        # Step 1: Get all courses belonging to this faculty
+        courses_res = db.table('courses').select(
+            'id, name, code'
+        ).eq('faculty_id', faculty_id).execute()
+
+        faculty_courses = courses_res.data or []
+        course_ids = [c['id'] for c in faculty_courses]
+        course_map = {c['id']: c for c in faculty_courses}
+
+        print(f'Faculty has {len(faculty_courses)} courses: {[c["name"] for c in faculty_courses]}')
+
+        if not course_ids:
+            return []
+
+        # Step 2: Get timetable slots for today matching faculty courses
+        timetable_res = db.table('timetable').select(
+            'id, course_id, day_of_week, start_time, end_time, room'
+        ).eq('day_of_week', today).in_(
+            'course_id', course_ids
+        ).execute()
+
+        slots = timetable_res.data or []
+        print(f'Found {len(slots)} slots for today')
+
+        # Step 3: Build response with course name attached manually
+        result = []
+        for slot in slots:
+            course = course_map.get(slot.get('course_id'), {})
+            result.append({
+                'id': slot['id'],
+                'course_id': slot.get('course_id'),
+                'day_of_week': slot.get('day_of_week'),
+                'start_time': slot.get('start_time', ''),
+                'end_time': slot.get('end_time', ''),
+                'room': slot.get('room', ''),
+                'course_name': course.get('name', 'Unknown Course'),
+                'course_code': course.get('code', ''),
+                'courses': {
+                    'id': course.get('id', ''),
+                    'name': course.get('name', 'Unknown Course'),
+                    'code': course.get('code', '')
+                }
+            })
+
+        print(f'Returning {len(result)} slots with course names')
+        return result
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f'Timetable today error: {str(e)}'
+        )
+
 @router.get("/", response_model=List[TimetableResponse])
-def get_timetable(faculty_user: dict = Depends(get_current_faculty), db=Depends(get_db)):
-    # Extract the actual ID string from the dictionary
-    faculty_id = faculty_user.get("faculty_id") or faculty_user.get("id")
-    
-    # We use courses(*) to join the course data so the frontend can show the course name
-    response = db.table("timetable").select("*, courses(*)").eq("faculty_id", faculty_id).execute()
-    return response.data
+def get_timetable(current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+    faculty_id = current_faculty['faculty_id']
+
+    try:
+        db = get_db()
+
+        # Get faculty courses
+        courses_res = db.table('courses').select(
+            'id, name, code'
+        ).eq('faculty_id', faculty_id).execute()
+
+        faculty_courses = courses_res.data or []
+        course_ids = [c['id'] for c in faculty_courses]
+        course_map = {c['id']: c for c in faculty_courses}
+
+        if not course_ids:
+            return []
+
+        # Get all timetable slots for these courses
+        timetable_res = db.table('timetable').select(
+            'id, course_id, day_of_week, start_time, end_time, room'
+        ).in_('course_id', course_ids).execute()
+
+        slots = timetable_res.data or []
+
+        result = []
+        for slot in slots:
+            course = course_map.get(slot.get('course_id'), {})
+            result.append({
+                'id': slot['id'],
+                'course_id': slot.get('course_id'),
+                'day_of_week': slot.get('day_of_week'),
+                'start_time': slot.get('start_time', ''),
+                'end_time': slot.get('end_time', ''),
+                'room': slot.get('room', ''),
+                'course_name': course.get('name', 'Unknown'),
+                'course_code': course.get('code', ''),
+                'courses': {
+                    'id': course.get('id', ''),
+                    'name': course.get('name', 'Unknown'),
+                    'code': course.get('code', '')
+                }
+            })
+
+        return result
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f'Timetable fetch error: {str(e)}'
+        )
 
 @router.post("/", response_model=TimetableResponse, status_code=status.HTTP_201_CREATED)
 def add_to_timetable(
     entry: TimetableCreate, 
-    faculty_user: dict = Depends(get_current_faculty), 
+    current_faculty: dict = Depends(get_current_faculty), 
     db=Depends(get_db)
 ):
-    faculty_id = faculty_user.get("faculty_id") or faculty_user.get("id")
+    faculty_id = current_faculty["faculty_id"]
     
     timetable_data = entry.model_dump()
-    timetable_data["faculty_id"] = faculty_id
     
     response = db.table("timetable").insert(timetable_data).execute()
     
@@ -164,13 +151,17 @@ def add_to_timetable(
 @router.delete("/{entry_id}")
 def delete_timetable_entry(
     entry_id: str, 
-    faculty_user: dict = Depends(get_current_faculty), 
+    current_faculty: dict = Depends(get_current_faculty), 
     db=Depends(get_db)
 ):
-    faculty_id = faculty_user.get("faculty_id") or faculty_user.get("id")
+    faculty_id = current_faculty["faculty_id"]
     
-    # Verify the entry belongs to this faculty before deleting
-    existing = db.table("timetable").select("id").eq("id", entry_id).eq("faculty_id", faculty_id).execute()
+    courses_res = db.table("courses").select("id").eq("faculty_id", faculty_id).execute()
+    course_ids = [c["id"] for c in courses_res.data]
+    if not course_ids:
+        raise HTTPException(status_code=404, detail="Entry not found or unauthorized")
+        
+    existing = db.table("timetable").select("id").eq("id", entry_id).in_("course_id", course_ids).execute()
     
     if not existing.data:
         raise HTTPException(
@@ -180,3 +171,4 @@ def delete_timetable_entry(
         
     db.table("timetable").delete().eq("id", entry_id).execute()
     return {"message": "Entry deleted"}
+

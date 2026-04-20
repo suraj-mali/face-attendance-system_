@@ -6,45 +6,9 @@ from app.database import get_db
 
 router = APIRouter()
 
-# @router.get("/")
-# async def get_courses(current_faculty: dict = Depends(get_current_faculty)):
-#     # Extract ONLY the ID string from the dictionary
-#     faculty_id = current_faculty.get("faculty_id") # or current_faculty.get("id")
-    
-#     # Now this will work because faculty_id is just a string, not a dict
-#     response = db.table("courses").select("*").eq("faculty_id", faculty_id).execute()
-#     return response.data
-
-# @router.post("/", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
-# def create_course(
-#     course: CourseCreate, 
-#     faculty_id: str = Depends(get_current_faculty), 
-#     db=Depends(get_db)
-# ):
-#     # Check if course code is unique globally or per faculty. Assuming globally.
-#     existing = db.table("courses").select("id").eq("code", course.code).execute()
-#     if existing.data:
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="Course with this code already exists"
-#         )
-        
-#     course_data = course.model_dump()
-#     course_data["faculty_id"] = faculty_id
-    
-#     response = db.table("courses").insert(course_data).execute()
-#     if not response.data:
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Failed to create course"
-#         )
-        
-#     return response.data[0]
-
 @router.get("/", response_model=List[CourseResponse])
-def get_courses(current_user: dict = Depends(get_current_faculty), db=Depends(get_db)):
-    # Extract the ID from the dict returned by get_current_faculty
-    faculty_id = current_user.get("faculty_id") or current_user.get("id")
+def get_courses(current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+    faculty_id = current_faculty["faculty_id"]
     
     response = db.table("courses").select("*").eq("faculty_id", faculty_id).execute()
     return response.data
@@ -52,10 +16,10 @@ def get_courses(current_user: dict = Depends(get_current_faculty), db=Depends(ge
 @router.post("/", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
 def create_course(
     course: CourseCreate, 
-    current_user: dict = Depends(get_current_faculty), 
+    current_faculty: dict = Depends(get_current_faculty), 
     db=Depends(get_db)
 ):
-    faculty_id = current_user.get("faculty_id") or current_user.get("id")
+    faculty_id = current_faculty["faculty_id"]
     
     # Check for existing code
     existing = db.table("courses").select("id").eq("code", course.code).execute()
@@ -71,9 +35,10 @@ def create_course(
 @router.get("/{course_id}", response_model=CourseResponse)
 def get_course(
     course_id: str, 
-    faculty_id: str = Depends(get_current_faculty), 
+    current_faculty: dict = Depends(get_current_faculty), 
     db=Depends(get_db)
 ):
+    faculty_id = current_faculty["faculty_id"]
     response = db.table("courses").select("*").eq("id", course_id).eq("faculty_id", faculty_id).execute()
     if not response.data:
         raise HTTPException(
@@ -87,9 +52,10 @@ def get_course(
 def update_course(
     course_id: str, 
     course_data: CourseCreate, 
-    faculty_id: str = Depends(get_current_faculty), 
+    current_faculty: dict = Depends(get_current_faculty), 
     db=Depends(get_db)
 ):
+    faculty_id = current_faculty["faculty_id"]
     # Verify ownership
     existing = db.table("courses").select("id").eq("id", course_id).eq("faculty_id", faculty_id).execute()
     if not existing.data:
@@ -112,9 +78,10 @@ def update_course(
 @router.delete("/{course_id}")
 def delete_course(
     course_id: str, 
-    faculty_id: str = Depends(get_current_faculty), 
+    current_faculty: dict = Depends(get_current_faculty), 
     db=Depends(get_db)
 ):
+    faculty_id = current_faculty["faculty_id"]
     existing = db.table("courses").select("id").eq("id", course_id).eq("faculty_id", faculty_id).execute()
     if not existing.data:
         raise HTTPException(
@@ -128,9 +95,10 @@ def delete_course(
 @router.patch("/{course_id}/toggle")
 def toggle_course(
     course_id: str, 
-    faculty_id: str = Depends(get_current_faculty), 
+    current_faculty: dict = Depends(get_current_faculty), 
     db=Depends(get_db)
 ):
+    faculty_id = current_faculty["faculty_id"]
     existing = db.table("courses").select("is_active").eq("id", course_id).eq("faculty_id", faculty_id).execute()
     if not existing.data:
         raise HTTPException(
@@ -152,3 +120,4 @@ def toggle_course(
         "course_id": course_id,
         "is_active": new_status
     }
+

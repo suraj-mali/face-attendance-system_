@@ -12,8 +12,10 @@ def get_students(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     search: str = Query(""),
+    current_faculty: dict = Depends(get_current_faculty),
     db=Depends(get_db)
 ):
+    faculty_id = current_faculty["faculty_id"]
     query = db.table("students").select("*", count="exact")
     
     if search:
@@ -37,7 +39,8 @@ def get_students(
     }
 
 @router.post("/", response_model=StudentResponse, status_code=status.HTTP_201_CREATED)
-def create_student(student: StudentCreate, db=Depends(get_db)):
+def create_student(student: StudentCreate, current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+    faculty_id = current_faculty["faculty_id"]
     # Check if roll_number is mutually unique constraint
     existing = db.table("students").select("id").eq("roll_number", student.roll_number).execute()
     if existing.data:
@@ -56,7 +59,8 @@ def create_student(student: StudentCreate, db=Depends(get_db)):
     return response.data[0]
 
 @router.get("/{student_id}", response_model=StudentResponse)
-def get_student(student_id: str, db=Depends(get_db)):
+def get_student(student_id: str, current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+    faculty_id = current_faculty["faculty_id"]
     response = db.table("students").select("*").eq("id", student_id).execute()
     if not response.data:
         raise HTTPException(
@@ -66,7 +70,8 @@ def get_student(student_id: str, db=Depends(get_db)):
     return response.data[0]
 
 @router.put("/{student_id}", response_model=StudentResponse)
-def update_student(student_id: str, student_data: StudentCreate, db=Depends(get_db)):
+def update_student(student_id: str, student_data: StudentCreate, current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+    faculty_id = current_faculty["faculty_id"]
     payload = student_data.model_dump(exclude_unset=True)
     response = db.table("students").update(payload).eq("id", student_id).execute()
     if not response.data:
@@ -77,7 +82,8 @@ def update_student(student_id: str, student_data: StudentCreate, db=Depends(get_
     return response.data[0]
 
 @router.delete("/{student_id}")
-def delete_student(student_id: str, db=Depends(get_db)):
+def delete_student(student_id: str, current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+    faculty_id = current_faculty["faculty_id"]
     response = db.table("students").delete().eq("id", student_id).execute()
     # Supabase usually returns the deleted record or nothing based on settings, handle gracefully
     if not response.data:
@@ -87,7 +93,8 @@ def delete_student(student_id: str, db=Depends(get_db)):
     return {"message": "Student deleted"}
 
 @router.post("/{student_id}/enroll")
-def enroll_student(student_id: str, payload: StudentEnroll):
+def enroll_student(student_id: str, payload: StudentEnroll, current_faculty: dict = Depends(get_current_faculty)):
+    faculty_id = current_faculty["faculty_id"]
     try:
         # Photos expects List[str] base64 encoded
         enrollment_service.enroll_student(student_id, payload.photos)
@@ -105,3 +112,4 @@ def enroll_student(student_id: str, payload: StudentEnroll):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred during enrollment: {str(e)}"
         )
+

@@ -291,7 +291,7 @@ export default function TimetablePage() {
       {isModalOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:p-0">
-            <div className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75" onClick={() => setIsModalOpen(false)}></div>
+            <div className="fixed inset-0 transition-opacity bg-black bg-opacity-50" onClick={() => setIsModalOpen(false)}></div>
 
             <div className="relative inline-block w-full max-w-md overflow-hidden text-left align-middle transition-all transform bg-white rounded-xl shadow-xl sm:my-8 border border-gray-200">
               <form onSubmit={handleAddSlot}>
@@ -310,7 +310,7 @@ export default function TimetablePage() {
                             required
                             value={formData.course_id}
                             onChange={(e) => setFormData({ ...formData, course_id: e.target.value })}
-                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                            className="mt-1 block w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                         >
                             {courses.map(c => (
                                 <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
@@ -324,7 +324,7 @@ export default function TimetablePage() {
                             required
                             value={formData.day_of_week}
                             onChange={(e) => setFormData({ ...formData, day_of_week: e.target.value })}
-                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                            className="mt-1 block w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                         >
                             {DAYS.map(d => (
                                 <option key={d} value={d}>{d}</option>
@@ -342,7 +342,7 @@ export default function TimetablePage() {
                             max="17:00"
                             value={formData.start_time}
                             onChange={(e) => setFormData({ ...formData, start_time: e.target.value })}
-                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                            className="mt-1 block w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                             />
                         </div>
                         <div>
@@ -354,7 +354,7 @@ export default function TimetablePage() {
                             max="18:00"
                             value={formData.end_time}
                             onChange={(e) => setFormData({ ...formData, end_time: e.target.value })}
-                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                            className="mt-1 block w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                             />
                         </div>
                         </div>
@@ -366,7 +366,7 @@ export default function TimetablePage() {
                             required
                             value={formData.room}
                             onChange={(e) => setFormData({ ...formData, room: e.target.value })}
-                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                            className="mt-1 block w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                             placeholder="e.g. Room 302, Lab 1"
                         />
                         </div>
