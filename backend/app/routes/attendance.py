@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 _session_embedding_cache: dict = {}
+_session_prepared_cache: dict = {}
 
 from app.services.face_service import FaceService
 _face_service = FaceService()
@@ -92,6 +93,16 @@ def start_session(body: SessionStart, current_faculty=Depends(get_current_facult
         if not session_res.data:
             raise HTTPException(status_code=500, detail="Failed to create session in database")
         session_id = session_res.data[0]["id"]
+        
+        # Clear any stale caches for this new session
+        _session_embedding_cache.pop(session_id, None)
+        _session_prepared_cache.pop(session_id, None)
+        # Clear marked cache for this session
+        cache_key = '_marked_' + session_id
+        if cache_key in _session_prepared_cache:
+            del _session_prepared_cache[cache_key]
+        
+        print(f'New session {session_id} started clean')
 
         return {
             "session_id": session_id,
@@ -154,11 +165,20 @@ def process_frame(body: FrameProcess, current_faculty=Depends(get_current_facult
         matched = _face_service.match_embedding(embedding, stored)
         
         if matched:
-          # Check duplicate
-          dup = db.table('attendance_records').select('id').eq(
-            'session_id', body.session_id).eq(
-            'student_id', matched['student_id']).execute()
-          already_marked = len(dup.data or []) > 0
+          # Always check database directly — do not rely on stale memory cache
+          already_marked = False
+          try:
+              dup_res = db.table('attendance_records').select(
+                  'id'
+              ).eq('session_id', body.session_id).eq(
+                  'student_id', matched['student_id']
+              ).execute()
+              already_marked = len(dup_res.data or []) > 0
+          except Exception as dup_err:
+              print(f'Duplicate check error: {dup_err}')
+              already_marked = False
+
+          print(f'{matched["name"]}: already_marked={already_marked}')
           
           if not already_marked:
             db.table('attendance_records').insert({

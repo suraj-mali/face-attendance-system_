@@ -332,11 +332,18 @@ export default function DashboardOverviewPage() {
         const data = await res.json()
         console.log("Stats API status:", res.status)
         console.log("Stats API response:", data)
+        console.log('Dashboard stats raw response:', data)
+
+        const todaySessions = 
+          Number(data.todays_sessions) ||
+          Number(data.todaysSessions) ||
+          Number(data.today_sessions) ||
+          0
 
         setStats({
           total_students: Number(data.total_students) || 0,
           total_courses: Number(data.total_courses) || 0,
-          todays_sessions: Number(data.todays_sessions) || 0,
+          todays_sessions: todaySessions,
           avg_attendance: Number(data.avg_attendance) || 0
         })
 
@@ -408,12 +415,6 @@ export default function DashboardOverviewPage() {
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <p className="text-sm font-medium text-gray-500 mb-1">Today's Sessions</p>
           <p className="text-3xl font-bold text-gray-900">{stats ? stats.todays_sessions : 0}</p>
-        </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-          <p className="text-sm font-medium text-gray-500 mb-1">Avg Attendance</p>
-          <p className="text-3xl font-bold text-gray-900">
-            {stats ? stats.avg_attendance + "%" : "0%"}
-          </p>
         </div>
       </div>
 

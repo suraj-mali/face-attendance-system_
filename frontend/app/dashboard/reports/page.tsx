@@ -51,7 +51,7 @@ export default function ReportsPage() {
 
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Tab state: 'all' | 'defaulters'
@@ -109,36 +109,92 @@ export default function ReportsPage() {
     }
   };
 
-  const handleExport = async () => {
-    if (!courseId) return;
-    try {
-      setExporting(true);
-      const token = localStorage.getItem("faculty_token");
-      
-      let url = `${process.env.NEXT_PUBLIC_API_URL}/reports/export?course_id=${courseId}`;
-      if (fromDate) url += `&from_date=${fromDate}`;
-      if (toDate) url += `&to_date=${toDate}`;
-
-      const res = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        responseType: "blob", 
-      });
-
-      const blobUrl = window.URL.createObjectURL(new Blob([res.data], { type: res.headers['content-type'] }));
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.setAttribute("download", `attendance_report_${new Date().getTime()}.xlsx`);
-      document.body.appendChild(link);
-      link.click();
-      
-      if (link.parentNode) link.parentNode.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (err) {
-      alert("Failed to export Excel file.");
-    } finally {
-      setExporting(false);
+  const handleDownloadExcel = async () => {
+    if (!courseId) {
+      alert('Please select a course first')
+      return
     }
-  };
+
+    try {
+      setDownloading(true)
+      const token = localStorage.getItem('faculty_token')
+      
+      const fromParam = fromDate || '2024-01-01'
+      const toParam = toDate || new Date().toISOString().split('T')[0]
+
+      const url = `${process.env.NEXT_PUBLIC_API_URL}/reports/export?course_id=${courseId}&from_date=${fromParam}&to_date=${toParam}`
+      
+      console.log('Downloading from:', url)
+
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': 'Bearer ' + token
+        }
+      })
+
+      console.log('Response status:', res.status)
+      console.log('Response type:', res.headers.get('Content-Type'))
+
+      if (!res.ok) {
+        let errorMsg = 'Export failed'
+        try {
+          const errData = await res.json()
+          errorMsg = errData.detail || errorMsg
+        } catch {
+          errorMsg = `Server error: ${res.status}`
+        }
+        alert('Failed to export Excel file: ' + errorMsg)
+        return
+      }
+
+      const contentType = res.headers.get('Content-Type') || ''
+      if (!contentType.includes('spreadsheet') && 
+          !contentType.includes('excel') &&
+          !contentType.includes('octet-stream')) {
+        const text = await res.text()
+        console.error('Unexpected content type:', contentType, text)
+        alert('Server returned wrong file type. Check backend logs.')
+        return
+      }
+
+      const blob = await res.blob()
+      console.log('Blob size:', blob.size)
+
+      if (blob.size === 0) {
+        alert('Downloaded file is empty. Check backend logs.')
+        return
+      }
+
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.style.display = 'none'
+      link.href = downloadUrl
+      
+      const disposition = res.headers.get('Content-Disposition') || ''
+      const nameMatch = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+      const fileName = nameMatch
+        ? nameMatch[1].replace(/['"]/g, '')
+        : `attendance_report_${fromParam}_${toParam}.xlsx`
+      
+      link.setAttribute('download', fileName)
+      document.body.appendChild(link)
+      link.click()
+      
+      setTimeout(() => {
+        document.body.removeChild(link)
+        window.URL.revokeObjectURL(downloadUrl)
+      }, 100)
+
+      console.log('Download triggered:', fileName)
+
+    } catch (err: any) {
+      console.error('Download error:', err)
+      alert('Download failed: ' + err.message)
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   return (
     <div className="p-6 h-full flex flex-col">
@@ -207,14 +263,11 @@ export default function ReportsPage() {
                     {reportData.course_code}: {reportData.course_name}
                 </h2>
                 <button
-                    onClick={handleExport}
-                    disabled={exporting}
-                    className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                  onClick={handleDownloadExcel}
+                  disabled={downloading || !courseId}
+                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium"
                 >
-                    <svg className="w-4 h-4 mr-2 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    {exporting ? "Downloading..." : "Download Excel"}
+                  {downloading ? 'Downloading...' : 'Download Excel'}
                 </button>
             </div>
 
@@ -320,6 +373,9 @@ export default function ReportsPage() {
                                   <th className="px-6 py-3 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Total</th>
                                   <th className="px-6 py-3 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Attendance %</th>
                                   <th className="px-6 py-3 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">Status</th>
+                                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">
+                                    Last Emotion
+                                  </th>
                               </tr>
                           </thead>
                           <tbody className="bg-white divide-y divide-gray-100 text-sm">
@@ -359,6 +415,19 @@ export default function ReportsPage() {
                                                   Defaulter
                                               </span>
                                           )}
+                                      </td>
+                                      <td className="px-4 py-2 text-center text-sm text-gray-700">
+                                        {(() => {
+                                          const e = (student as any).last_emotion
+                                          if (!e || e === 'N/A') return '—'
+                                          const map: Record<string, string> = {
+                                            happy: '😊 Happy', sad: '😢 Sad',
+                                            angry: '😠 Angry', neutral: '😐 Neutral',
+                                            surprised: '😲 Surprised', fearful: '😨 Fearful',
+                                            disgusted: '🤢 Disgusted'
+                                          }
+                                          return map[e.toLowerCase()] || '😐 Neutral'
+                                        })()}
                                       </td>
                                   </tr>
                               ))}

@@ -38,7 +38,7 @@ class FaceService:
             if img is None:
                 print('detect_all_faces: decoded image is None')
                 return []
-            img = resize_image(img, 480)
+            img = resize_image(img, 320)
             faces = self.app.get(img)
             if not faces:
                 print('detect_all_faces: no faces found in frame')
@@ -47,8 +47,8 @@ class FaceService:
             for face in faces:
                 score = float(face.det_score)
                 print(f'Face found: det_score={score:.3f}')
-                if score < 0.30:
-                    print(f'Skipping face: score {score:.3f} below 0.30')
+                if score < 0.20:
+                    print(f'Skipping face: score {score:.3f} below 0.20')
                     continue
                 result.append({
                     'embedding': np.array(face.embedding, dtype=np.float32),
@@ -69,7 +69,6 @@ class FaceService:
         threshold: float = 0.30
     ) -> dict or None:
         import numpy as np
-        import json
 
         if not stored_records:
             print('match_embedding: no stored records')
@@ -80,66 +79,50 @@ class FaceService:
             return None
 
         try:
-            # Normalize query embedding
+            # Normalize query once
             query = np.array(query_embedding, dtype=np.float32).flatten()
             nq = np.linalg.norm(query)
-            if nq < 1e-6:
-                print('match_embedding: query norm is zero')
-                return None
+            if nq < 1e-6: return None
             query = query / nq
-
-            best_score = -1.0
-            best_match = None
-
+            
+            # Build matrix of all stored embeddings
+            valid_records = []
+            embeddings_list = []
             for record in stored_records:
                 try:
-                    emb_data = record.get('face_embedding')
-                    if emb_data is None:
-                        continue
-
-                    # Handle string format
-                    if isinstance(emb_data, str):
-                        emb_data = json.loads(emb_data)
-
-                    # Convert to float32 numpy array
-                    stored = np.array(
-                        [float(x) for x in emb_data],
-                        dtype=np.float32
-                    ).flatten()
-
-                    # Shapes must match
-                    if stored.shape[0] != query.shape[0]:
-                        print(f'Shape mismatch for {record.get("name")}: {query.shape} vs {stored.shape}')
-                        continue
-
-                    # Normalize stored
-                    ns = np.linalg.norm(stored)
-                    if ns < 1e-6:
-                        continue
-                    stored_norm = stored / ns
-
-                    # Cosine similarity
-                    score = float(np.dot(query, stored_norm))
-
-                    if score > best_score:
-                        best_score = score
-                        best_match = record
-
-                except Exception as e:
-                    print(f'Error comparing {record.get("name")}: {e}')
+                    emb = record.get('face_embedding')
+                    if emb is None: continue
+                    import json
+                    if isinstance(emb, str):
+                        emb = json.loads(emb)
+                    arr = np.array([float(x) for x in emb], dtype=np.float32)
+                    ns = np.linalg.norm(arr)
+                    if ns < 1e-6: continue
+                    embeddings_list.append(arr / ns)
+                    valid_records.append(record)
+                except:
                     continue
-
-            name = best_match.get('name') if best_match else 'None'
-            print(f'match_embedding: best={best_score:.4f} ({name}) threshold={threshold}')
-
-            if best_score >= threshold and best_match:
+            
+            if not embeddings_list:
+                print('No valid embeddings to compare')
+                return None
+            
+            # Single matrix multiply = all scores at once (very fast)
+            matrix = np.stack(embeddings_list)
+            scores = matrix.dot(query)
+            best_idx = int(np.argmax(scores))
+            best_score = float(scores[best_idx])
+            
+            print(f'Best: {valid_records[best_idx].get("name")} score={best_score:.4f}')
+            
+            if best_score >= threshold:
+                best = valid_records[best_idx]
                 return {
-                    'student_id': best_match['id'],
-                    'name': best_match['name'],
-                    'roll_number': best_match['roll_number'],
+                    'student_id': best['id'],
+                    'name': best['name'],
+                    'roll_number': best['roll_number'],
                     'confidence': round(best_score, 4)
                 }
-
             return None
 
         except Exception as e:
@@ -148,41 +131,34 @@ class FaceService:
             return None
 
     def detect_emotion(self, img) -> str:
-        """
-        Detect the dominant emotion from a face image.
-        Returns one of: happy, sad, angry, neutral, 
-        surprised, fearful, disgusted
-        Returns 'neutral' if detection fails for any reason.
-        This method never raises an exception.
-        """
-        try:
-            if img is None:
-                return 'neutral'
-
-            from deepface import DeepFace
-
-            # Use enforce_detection=False so it does not crash
-            # if face is partially visible
-            analysis = DeepFace.analyze(
-                img,
-                actions=['emotion'],
-                enforce_detection=False,
-                silent=True
-            )
-
-            # DeepFace returns a list or dict depending on version
-            if isinstance(analysis, list) and len(analysis) > 0:
-                emotion = analysis[0].get('dominant_emotion', 'neutral')
-            elif isinstance(analysis, dict):
-                emotion = analysis.get('dominant_emotion', 'neutral')
-            else:
-                return 'neutral'
-
-            result = str(emotion).lower().strip()
-            print(f'Emotion detected: {result}')
-            return result
-
-        except Exception as e:
-            # Emotion detection is optional — never block attendance
-            print(f'Emotion detection skipped: {e}')
-            return 'neutral'
+        import threading
+        emotion_result = ['neutral']
+        
+        def _run():
+            try:
+                if img is None: return
+                import cv2
+                small = cv2.resize(img, (96, 96))
+                from deepface import DeepFace
+                r = DeepFace.analyze(
+                    small,
+                    actions=['emotion'],
+                    enforce_detection=False,
+                    detector_backend='opencv',
+                    silent=True
+                )
+                if isinstance(r, list) and r:
+                    emotion_result[0] = str(
+                        r[0].get('dominant_emotion', 'neutral')
+                    ).lower()
+                elif isinstance(r, dict):
+                    emotion_result[0] = str(
+                        r.get('dominant_emotion', 'neutral')
+                    ).lower()
+            except Exception as e:
+                print(f'Emotion error: {e}')
+        
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=0.4)
+        return emotion_result[0]

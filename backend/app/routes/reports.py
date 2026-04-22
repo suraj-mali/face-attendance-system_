@@ -239,22 +239,150 @@ def get_attendance(
         )
 
 @router.get("/export")
-def export_attendance(
+async def export_attendance(
     course_id: str,
-    from_date: Optional[str] = None,
-    to_date: Optional[str] = None,
-    current_faculty: dict = Depends(get_current_faculty),
-    db=Depends(get_db)
+    from_date: str = None,
+    to_date: str = None,
+    current_faculty: dict = Depends(get_current_faculty)
 ):
-    faculty_id = current_faculty["faculty_id"]
-    data = _calculate_attendance_data(course_id, from_date, to_date, faculty_id, db)
-    excel_bytes = generate_attendance_excel(data)
-    
-    return Response(
-        content=excel_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=attendance_report.xlsx"}
-    )
+    faculty_id = current_faculty['faculty_id']
+
+    try:
+        import math
+        from datetime import date as dt_date
+        db = get_db()
+
+        if not from_date:
+            from_date = '2024-01-01'
+        if not to_date:
+            to_date = dt_date.today().isoformat()
+
+        print(f'Export: course={course_id}, from={from_date}, to={to_date}')
+
+        # Verify course belongs to faculty
+        course_res = db.table('courses').select(
+            'id, name, code'
+        ).eq('id', course_id).eq('faculty_id', faculty_id).execute()
+
+        if not course_res.data:
+            raise HTTPException(
+                status_code=404,
+                detail='Course not found or access denied'
+            )
+        course = course_res.data[0]
+        print(f'Course found: {course["name"]}')
+
+        # Get sessions in date range
+        sessions_res = db.table('attendance_sessions').select(
+            'id'
+        ).eq('course_id', course_id).gte(
+            'session_date', from_date
+        ).lte('session_date', to_date).execute()
+
+        session_ids = [s['id'] for s in (sessions_res.data or [])]
+        total_sessions = len(session_ids)
+        print(f'Sessions found: {total_sessions}')
+
+        # Get all enrolled students
+        students_res = db.table('students').select(
+            'id, name, roll_number'
+        ).eq('is_enrolled', True).execute()
+        students = students_res.data or []
+        print(f'Students found: {len(students)}')
+
+        report_data = []
+        for student in students:
+            if not session_ids:
+                present_count = 0
+                last_emotion = None
+            else:
+                # Get attendance records for this student
+                rec_res = db.table('attendance_records').select(
+                    'id, emotion, marked_at'
+                ).eq('student_id', student['id']).eq(
+                    'is_present', True
+                ).in_('session_id', session_ids).execute()
+
+                present_count = len(rec_res.data or [])
+
+                # Get most recent emotion
+                last_emotion = None
+                if rec_res.data:
+                    sorted_recs = sorted(
+                        rec_res.data,
+                        key=lambda x: x.get('marked_at', ''),
+                        reverse=True
+                    )
+                    raw_emotion = sorted_recs[0].get('emotion', '')
+                    if raw_emotion and raw_emotion not in ('detecting', ''):
+                        last_emotion = raw_emotion
+                    else:
+                        last_emotion = 'neutral'
+
+            absent_count = total_sessions - present_count
+            percentage = round(
+                present_count / total_sessions * 100, 1
+            ) if total_sessions > 0 else 0.0
+
+            shortfall = 0
+            if percentage < 75 and total_sessions > 0:
+                shortfall = max(0, math.ceil(
+                    (0.75 * total_sessions - present_count) / 0.25
+                ))
+
+            report_data.append({
+                'roll_number': student['roll_number'],
+                'name': student['name'],
+                'total_classes': total_sessions,
+                'present': present_count,
+                'absent': absent_count,
+                'percentage': percentage,
+                'is_defaulter': percentage < 75,
+                'shortfall': shortfall,
+                'last_emotion': last_emotion
+            })
+
+        # Sort by percentage ascending (worst first)
+        report_data.sort(key=lambda x: x['percentage'])
+        print(f'Report data built: {len(report_data)} students')
+
+        # Generate Excel file
+        from app.utils.export_utils import generate_attendance_excel
+        excel_bytes = generate_attendance_excel(
+            course_name=course['name'],
+            course_code=course['code'],
+            report_data=report_data,
+            from_date=from_date,
+            to_date=to_date
+        )
+        print(f'Excel generated: {len(excel_bytes)} bytes')
+
+        # Return as downloadable file
+        from fastapi.responses import Response
+        safe_code = course['code'].replace('/', '-').replace(' ', '_')
+        filename = f'attendance_{safe_code}_{from_date}_to_{to_date}.xlsx'
+
+        return Response(
+            content=excel_bytes,
+            status_code=200,
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Content-Length': str(len(excel_bytes)),
+                'Cache-Control': 'no-cache',
+                'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length'
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f'Export failed: {str(e)}'
+        )
 
 @router.post("/send-alerts")
 def send_alerts(

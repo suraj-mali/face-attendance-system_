@@ -53,6 +53,7 @@ export default function AttendanceSessionPage() {
   const [isEnding, setIsEnding] = useState(false);
   const [statusMessage, setStatusMessage] = useState("Waiting for faces...");
   const [endingSummary, setEndingSummary] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
 
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -127,8 +128,9 @@ export default function AttendanceSessionPage() {
       if (isProcessingRef.current) return
       if (!sessionId || !webcamRef.current) return
       isProcessingRef.current = true
+      setProcessing(true)
       try {
-        const imageSrc = webcamRef.current.getScreenshot({ width: 480, height: 360 })
+        const imageSrc = webcamRef.current.getScreenshot({ width: 320, height: 240 })
         if (!imageSrc) {
           console.log('No screenshot available')
           return
@@ -158,53 +160,122 @@ export default function AttendanceSessionPage() {
         
         // Update canvas
         const canvas = canvasRef.current
-        const video = webcamRef.current?.video
-        if (canvas && video) {
+        const webcamVideo = webcamRef.current?.video
+        
+        if (canvas && webcamVideo) {
           const ctx = canvas.getContext('2d')
           if (ctx) {
+            // Get the actual displayed size of the webcam on screen
+            const displayWidth = webcamVideo.clientWidth || canvas.width
+            const displayHeight = webcamVideo.clientHeight || canvas.height
+            
+            // Frame was captured at 320x240
+            const capturedWidth = 320
+            const capturedHeight = 240
+            
+            // Scale factors to convert from captured coords to display coords
+            const scaleX = displayWidth / capturedWidth
+            const scaleY = displayHeight / capturedHeight
+            
+            // Make canvas match the displayed webcam size
+            if (canvas.width !== displayWidth) canvas.width = displayWidth
+            if (canvas.height !== displayHeight) canvas.height = displayHeight
+            
             ctx.clearRect(0, 0, canvas.width, canvas.height)
+            
             detected.forEach((face: any) => {
-              if (!face.bbox) return
-              const [x1, y1, x2, y2] = face.bbox
+              if (!face.bbox || face.bbox.length < 4) return
+              
+              // Scale bbox from captured frame size to display size
+              const x1 = face.bbox[0] * scaleX
+              const y1 = face.bbox[1] * scaleY
+              const x2 = face.bbox[2] * scaleX
+              const y2 = face.bbox[3] * scaleY
+              const w = x2 - x1
+              const h = y2 - y1
+              
+              if (w <= 0 || h <= 0) return
+              
+              // Color based on detection state
+              if (face.is_unknown) {
+                ctx.strokeStyle = '#ef4444'  // red for unknown
+              } else if (face.already_marked) {
+                ctx.strokeStyle = '#22c55e'  // green for already marked (not blue)
+              } else {
+                ctx.strokeStyle = '#22c55e'  // green for newly marked
+              }
+              
               ctx.lineWidth = 3
-              ctx.strokeStyle = face.is_unknown ? '#dc2626' : face.already_marked ? '#2563eb' : '#16a34a'
-              ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
-              ctx.fillStyle = ctx.strokeStyle
-              ctx.font = 'bold 13px sans-serif'
-              const label = face.is_unknown ? 'Unknown' : face.name || 'Matched'
-              ctx.fillText(label, x1 + 2, y2 + 16)
+              ctx.strokeRect(x1, y1, w, h)
+              
+              // Draw name label above the box
+              const label = face.is_unknown 
+                ? 'Unknown' 
+                : (face.name || 'Detected')
+              
+              ctx.font = 'bold 13px Arial'
+              const textWidth = ctx.measureText(label).width
+              
+              // Background for text readability
+              ctx.fillStyle = face.is_unknown ? '#ef4444' : '#22c55e'
+              ctx.fillRect(x1, y1 - 22, textWidth + 8, 20)
+              
+              // White text
+              ctx.fillStyle = '#ffffff'
+              ctx.fillText(label, x1 + 4, y1 - 6)
             })
           }
         }
         
         // Update present students list
+        console.log('Detected faces:', detected.length, detected)
+
+        // Find students newly marked in this frame
         const newlyMarked = detected.filter((f: any) =>
           f.is_unknown === false &&
           f.already_marked === false &&
-          f.student_id &&
-          !presentStudentsRef.current.find(s => s.student_id === f.student_id)
+          f.student_id != null &&
+          f.name != null
         )
+
+        console.log('Newly marked this frame:', newlyMarked.length, newlyMarked.map((f:any) => f.name))
+
         if (newlyMarked.length > 0) {
-          const toAdd = newlyMarked.map((f: any) => ({
-            student_id: f.student_id,
-            name: f.name,
-            roll_number: f.roll_number,
-            confidence: Math.round((f.confidence || 0) * 100),
-            emotion: f.emotion || 'neutral',
-            time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
-          }))
-          presentStudentsRef.current = [...toAdd, ...presentStudentsRef.current]
-          setPresentStudents([...presentStudentsRef.current])
+          setPresentStudents((prev: any[]) => {
+            const existingIds = new Set(prev.map((s: any) => s.student_id))
+            const toAdd = newlyMarked
+              .filter((f: any) => !existingIds.has(f.student_id))
+              .map((f: any) => ({
+                student_id: f.student_id,
+                name: f.name || 'Unknown',
+                roll_number: f.roll_number || '',
+                confidence: Math.round(((f.confidence || 0) * 100)),
+                emotion: f.emotion || 'neutral',
+                time: new Date().toLocaleTimeString('en-IN', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })
+              }))
+            if (toAdd.length > 0) {
+              console.log('Adding to present list:', toAdd.map(s => s.name))
+              return [...toAdd, ...prev]
+            }
+            return prev
+          })
         }
-        setTotalPresent(data.total_present || 0)
+
+        if (typeof data.total_present === 'number') {
+          setTotalPresent(data.total_present)
+        }
       } catch (err) {
         console.error('captureAndProcess error:', err)
       } finally {
         isProcessingRef.current = false
+        setProcessing(false)
       }
     };
 
-    intervalRef.current = setInterval(captureAndProcess, 2000);
+    intervalRef.current = setInterval(captureAndProcess, 1500);
 
     return () => {
       if (intervalRef.current) {
@@ -331,12 +402,27 @@ export default function AttendanceSessionPage() {
             ref={canvasRef}
             width={640}
             height={480}
-            className="absolute top-0 left-0 w-full h-full pointer-events-none"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              pointerEvents: 'none'
+            }}
           />
           <div className="mt-2 text-xs text-gray-500 bg-gray-100 p-2 rounded">
              <p>Session ID: {sessionData?.session_id}</p>
              <p>Total enrolled: {totalStudents}</p>
              <p>Interval running: {sessionData?.session_id && !sessionEnded ? "Yes" : "No"}</p>
+             <div className="flex items-center gap-2 mt-1">
+               <div className={`w-2 h-2 rounded-full transition-colors ${
+                 processing ? 'bg-green-400 animate-pulse' : 'bg-gray-300'
+               }`}/>
+               <span className="text-xs text-gray-400">
+                 {processing ? 'Scanning...' : 'Ready'}
+               </span>
+             </div>
           </div>
         </div>
 
