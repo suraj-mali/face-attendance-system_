@@ -8,14 +8,20 @@ from datetime import date
 router = APIRouter()
 
 @router.get("/today", response_model=List[TimetableResponse])
-def get_today_timetable(current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+def get_today_timetable(
+    day: str = None,
+    current_faculty: dict = Depends(get_current_faculty),
+    db=Depends(get_db)
+):
     faculty_id = current_faculty['faculty_id']
 
     try:
         from datetime import datetime
         db = get_db()
 
-        today = datetime.now().strftime('%A')
+        # Use client-provided day if available (fixes UTC vs IST timezone mismatch)
+        # Frontend passes the browser's local day name e.g. ?day=Thursday
+        today = day if day else datetime.now().strftime('%A')
         print(f'Fetching timetable for: {today}, faculty: {faculty_id}')
 
         # Step 1: Get all courses belonging to this faculty

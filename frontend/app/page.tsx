@@ -25,7 +25,8 @@ export default function AttendancePage() {
       setLoading(true);
       try {
         const token = localStorage.getItem("faculty_token");
-        const { data } = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/timetable/today`, {
+        const localDay = new Date().toLocaleDateString("en-US", { weekday: "long" });
+        const { data } = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/timetable/today?day=${localDay}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
 

@@ -61,7 +61,11 @@ def update_profile(
     return updated_faculty
 
 @router.get("/dashboard-stats")
-def get_dashboard_stats(current_faculty: dict = Depends(get_current_faculty), db=Depends(get_db)):
+def get_dashboard_stats(
+    local_date: str = None,
+    current_faculty: dict = Depends(get_current_faculty),
+    db=Depends(get_db)
+):
     faculty_id = current_faculty["faculty_id"]
     
     # 1. Total Students 
@@ -72,8 +76,8 @@ def get_dashboard_stats(current_faculty: dict = Depends(get_current_faculty), db
     courses_res = db.table("courses").select("*", count="exact").eq("faculty_id", faculty_id).execute()
     total_courses = courses_res.count if courses_res.count is not None else 0
     
-    # 3. Today's Sessions
-    today = date.today().isoformat()
+    # 3. Today's Sessions — use client-provided date to avoid UTC vs IST mismatch
+    today = local_date if local_date else date.today().isoformat()
     todays_sessions_res = db.table("attendance_sessions").select("*", count="exact")\
         .eq("faculty_id", faculty_id)\
         .eq("session_date", today)\

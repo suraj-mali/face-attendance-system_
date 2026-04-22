@@ -324,8 +324,9 @@ export default function DashboardOverviewPage() {
 
         console.log("Token being used:", token ? "EXISTS" : "MISSING")
 
+        const localISODate = new Date().toLocaleDateString("en-CA"); // gives YYYY-MM-DD in local time
         const res = await fetch(
-          process.env.NEXT_PUBLIC_API_URL + "/faculty/dashboard-stats",
+          process.env.NEXT_PUBLIC_API_URL + `/faculty/dashboard-stats?local_date=${localISODate}`,
           { headers: { "Authorization": "Bearer " + token } }
         )
         const data = await res.json()
@@ -344,7 +345,8 @@ export default function DashboardOverviewPage() {
             "Authorization": `Bearer ${token}`,
           },
         };
-        const timetableResponse = await axios.get(process.env.NEXT_PUBLIC_API_URL + "/timetable/today", config);
+        const localDay = new Date().toLocaleDateString("en-US", { weekday: "long" });
+        const timetableResponse = await axios.get(process.env.NEXT_PUBLIC_API_URL + `/timetable/today?day=${localDay}`, config);
         setTimetable(timetableResponse.data);
       } catch (error) {
         console.error("Failed to fetch dashboard data:", error);
