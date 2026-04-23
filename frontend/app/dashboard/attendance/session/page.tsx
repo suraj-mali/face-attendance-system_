@@ -257,7 +257,7 @@ export default function AttendanceSessionPage() {
                 })
               }))
             if (toAdd.length > 0) {
-              console.log('Adding to present list:', toAdd.map(s => s.name))
+              console.log('Adding to present list:', toAdd.map((s: any) => s.name))
               return [...toAdd, ...prev]
             }
             return prev
