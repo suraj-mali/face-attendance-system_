@@ -152,6 +152,8 @@ def process_frame(body: FrameProcess, current_faculty=Depends(get_current_facult
       
       result_list = []
       from datetime import date
+      from app.utils.image_utils import base64_to_numpy
+      full_frame_img = base64_to_numpy(body.frame)
       
       for face in detected_faces:
         embedding = face.get('embedding')
@@ -196,12 +198,21 @@ def process_frame(body: FrameProcess, current_faculty=Depends(get_current_facult
           # Does not affect attendance marking if it fails
           emotion = 'neutral'
           try:
-              from app.utils.image_utils import base64_to_numpy
-              emotion_img = base64_to_numpy(body.frame)
-              if emotion_img is not None:
-                  emotion = _face_service.detect_emotion(
-                      emotion_img
-                  )
+              if full_frame_img is not None:
+                  # Crop face using bbox
+                  x1, y1, x2, y2 = [int(v) for v in bbox]
+                  h, w = full_frame_img.shape[:2]
+                  
+                  # Add 20px padding for better emotion detection
+                  px1 = max(0, x1 - 20)
+                  py1 = max(0, y1 - 20)
+                  px2 = min(w, x2 + 20)
+                  py2 = min(h, y2 + 20)
+                  
+                  face_crop = full_frame_img[py1:py2, px1:px2]
+                  
+                  if face_crop.size > 0:
+                      emotion = _face_service.detect_emotion(face_crop)
           except Exception as emotion_err:
               print(f'Emotion step skipped: {emotion_err}')
               emotion = 'neutral'

@@ -200,7 +200,7 @@ export default function AttendanceSessionPage() {
               if (face.is_unknown) {
                 ctx.strokeStyle = '#ef4444'  // red for unknown
               } else if (face.already_marked) {
-                ctx.strokeStyle = '#22c55e'  // green for already marked (not blue)
+                ctx.strokeStyle = '#3b82f6'  // blue for already marked
               } else {
                 ctx.strokeStyle = '#22c55e'  // green for newly marked
               }
@@ -211,13 +211,13 @@ export default function AttendanceSessionPage() {
               // Draw name label above the box
               const label = face.is_unknown 
                 ? 'Unknown' 
-                : (face.name || 'Detected')
+                : `${face.name || 'Detected'}${face.already_marked ? ' (Already marked)' : ''}`
               
               ctx.font = 'bold 13px Arial'
               const textWidth = ctx.measureText(label).width
               
               // Background for text readability
-              ctx.fillStyle = face.is_unknown ? '#ef4444' : '#22c55e'
+              ctx.fillStyle = face.is_unknown ? '#ef4444' : (face.already_marked ? '#3b82f6' : '#22c55e')
               ctx.fillRect(x1, y1 - 22, textWidth + 8, 20)
               
               // White text
